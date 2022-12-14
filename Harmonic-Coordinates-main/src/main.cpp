@@ -49,23 +49,6 @@ enum CoordinateType {Harmonic};
 CoordinateType coordinate_type = Harmonic;
 
 
-void set_original_mesh(igl::opengl::glfw::Viewer& viewer);
-
-int nearest_control_vertex(Eigen::Vector3d &click_point, bool original_cage)
-{
-  Eigen::RowVector2d click_point_2d(click_point(0), click_point(1));
-  Eigen::MatrixXd& cage = original_cage ? original_Vc : Vc;
-  Eigen::MatrixXd& interor = original_cage? original_Vi : Vi;
-  int cage_index;
-  double cage_dist = (cage.rowwise() - click_point_2d).rowwise().squaredNorm().minCoeff(&cage_index);
-  int interior_index;
-  double interior_dist = interor.rows()>0&&coordinate_type==Harmonic ? (interor.rowwise() - click_point_2d).rowwise().squaredNorm().minCoeff(&interior_index) : DBL_MAX;
-  double dist = std::min(cage_dist, interior_dist);
-  if (dist > selection_threshold)
-    return -1;
-  int index = cage_dist < interior_dist ? cage_index : cage.rows() + interior_index;
-  return index;
-}
 
 void set_original_mesh(igl::opengl::glfw::Viewer& viewer)
 {
