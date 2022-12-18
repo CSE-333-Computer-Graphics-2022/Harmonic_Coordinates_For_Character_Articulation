@@ -10,4 +10,4 @@
 
 ## Usage
 
-    ./hc_bin ../data/file.off ../data/cage.off
+    ./example
