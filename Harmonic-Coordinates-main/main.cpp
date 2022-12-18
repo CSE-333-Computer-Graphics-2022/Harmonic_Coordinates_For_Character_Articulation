@@ -34,7 +34,6 @@ MatrixXd weight;
 MatrixXd original_Vi;
 MatrixXd control_vertices;
 MatrixXi control_faces;
-
 // used for display 
 int current_cage_index = 0;
 // used for deform
