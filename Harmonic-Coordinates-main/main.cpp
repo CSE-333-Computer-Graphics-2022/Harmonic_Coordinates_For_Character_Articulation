@@ -1,3 +1,38 @@
+// #include <igl/opengl/glfw/Viewer.h>
+
+// int main(int argc, char *argv[])
+// {
+//   // Inline mesh of a cube
+//   MatrixXd V= (MatrixXd(8,3)<<
+//     0.0,0.0,0.0,
+//     0.0,0.0,1.0,
+//     0.0,1.0,0.0,
+//     0.0,1.0,1.0,
+//     1.0,0.0,0.0,
+//     1.0,0.0,1.0,
+//     1.0,1.0,0.0,
+//     1.0,1.0,1.0).finished();
+//   MatrixXi F = (MatrixXi(12,3)<<
+//     0,6,4,
+//     0,2,6,
+//     0,3,2,
+//     0,1,3,
+//     2,7,6,
+//     2,3,7,
+//     4,6,7,
+//     4,7,5,
+//     0,4,5,
+//     0,5,1,
+//     1,5,7,
+//     1,7,3).finished();
+
+//   // Plot the mesh
+//   Viewer viewer;
+//   viewer.data().set_mesh(V, F);
+//   viewer.data().set_face_based(true);
+//   viewer.launch();
+// }
+
 #include <iostream>
 #include <igl/boundary_loop.h>
 #include <igl/opengl/glfw/Viewer.h>
@@ -15,30 +50,28 @@ using namespace std;
 using namespace igl::opengl::glfw;
 using namespace Eigen;
 
-MatrixXd V;
-MatrixXi F;
+//model and cage vertices and faces
+MatrixXd V,main_vertices,Vertices_cage;;
+MatrixXi F,Faces_cage;
 
-// cage mesh
-MatrixXd main_vertices;
-MatrixXd Vertices;
-MatrixXi Faces_cage;
-MatrixXi H;
+MatrixXi Ht;
 
-double h = 7; //jumps between cells of the cage 
-double offsetX = -50; //X offset of the grid
-double offsetY = 430; //Y offset of the grid
-// weight function
+double h = 7; 
+double offsetX = -50; 
+double offsetY = 430; 
+// weights
 MatrixXd cage_weights;
 MatrixXd weight;
-// interior control mesh
+// interior mesh
 MatrixXd original_Vi;
 MatrixXd control_vertices;
 MatrixXi control_faces;
-// used for display 
+
+
 int current_cage_index = 0;
-// used for deform
+// used for articulation
 VectorXi cage_vertices;
-Vector2d previous_mouse_coordinate;
+Vector2d prev_mouse;
 MatrixXi E(4,2);
 
 
@@ -51,7 +84,7 @@ VectorXi rest_verties;
 enum cell_Type{UNTYPED,INTERIOR,EXTERIOR, BOUNDARY,};
 int interpolationPrecision = 40; // point on edges to detect cells
 int grid_size = 12; //based on paper, s controls size of grid 2^s
-
+int check=0;
 
 MatrixXd Cage; //Cage vertices
 MatrixXi CageEdgesIndices; 
@@ -62,24 +95,25 @@ int control_vertex(Vector3d &click_point, bool original_cage)
 {
   RowVector2d click_point_2d(click_point(0), click_point(1));
   MatrixXd cage;
-  MatrixXd interor; 
+  MatrixXd inter; 
   if(original_cage)
   {
   cage=main_vertices;
-  interor=original_Vi;
+  inter=original_Vi;
   }
   else
   {
-  cage=Vertices;
-  interor=control_vertices;
+  cage=Vertices_cage;
+  inter=control_vertices;
   }
-  
-  int cage_index;
-  double cage_dist = (cage.rowwise() - click_point_2d).rowwise().squaredNorm().minCoeff(&cage_index);
+
   int interior_index;
   double interior_dist;
-  if(interor.rows()>0){ 
-  interior_dist = (interor.rowwise() - click_point_2d).rowwise().squaredNorm().minCoeff(&interior_index);
+  int cage_index;
+
+  double cage_dist = (cage.rowwise() - click_point_2d).rowwise().squaredNorm().minCoeff(&cage_index);
+  if(inter.rows()>0){ 
+  interior_dist = (inter.rowwise() - click_point_2d).rowwise().squaredNorm().minCoeff(&interior_index);
   }
   else
   {
@@ -102,29 +136,27 @@ int control_vertex(Vector3d &click_point, bool original_cage)
 }
 int Flag = 0;
 
-bool callback_mouse_down(Viewer& viewer, int button, int modifier)
+bool mouse_down(Viewer& viewer, int button, int modifier)
 {
-  Vector3d Z;
+  Vector3d Zaxis;
   if (button == (int) Viewer::MouseButton::Right)
   {
     return false;
   }
-  bool click_letriang_faces = viewer.current_mouse_x < viewer.core(screen).viewport(2);
+  bool Select = viewer.current_mouse_x < viewer.core(screen).viewport(2);
 
-    // example from libigl tut 708
-    igl::unproject_on_plane(
-      Vector2i(viewer.current_mouse_x, viewer.core(screen).viewport(3) - viewer.current_mouse_y),
-      viewer.core(screen).proj * viewer.core(screen).view,viewer.core(screen).viewport,Vector4d(0,0,1,0),Z);
-  
-  int idx = control_vertex(Z, !click_letriang_faces);
-  if (idx < 0){
+    //libigl tut 708
+  Vector4d d1=Vector4d(0, 0, 1, 0);
+  igl::unproject_on_plane(Vector2i(viewer.current_mouse_x, viewer.core(screen).viewport(3) - viewer.current_mouse_y),viewer.core(screen).proj * viewer.core(screen).view,viewer.core(screen).viewport,d1,Zaxis);
+  int mouse_idx = control_vertex(Zaxis, !Select);
+  if (mouse_idx < 0 && check==0){
   return false;
   }
-  current_cage_index = idx;
-  if (click_letriang_faces)
+  current_cage_index = mouse_idx;
+  if (Select==true)
   {
-    choosen_control_vertex = idx;
-    previous_mouse_coordinate << Z(0), Z(1);
+    choosen_control_vertex = mouse_idx;
+    prev_mouse << Zaxis(0), Zaxis(1);
     Flag = 1;
   } else
   {
@@ -138,7 +170,7 @@ bool callback_mouse_down(Viewer& viewer, int button, int modifier)
   return true;
 }
 
-bool callback_mouse_move(Viewer& viewer, int mouse_x, int mouse_y)
+bool mouse_move(Viewer& viewer, int mouse_x, int mouse_y)
 {
   RowVector3d  r1=RowVector3d(1, 0, 0);
   RowVector3d  r2=RowVector3d(0, 1, 0);
@@ -146,24 +178,25 @@ bool callback_mouse_move(Viewer& viewer, int mouse_x, int mouse_y)
   {
     return false;
   }
-  Vector3d Z;
+  Vector3d Zaxis;
+  Vector4d d=Vector4d(0, 0, 1, 0);
   igl::unproject_on_plane(
     Vector2i(viewer.current_mouse_x, viewer.core(screen).viewport(3) - viewer.current_mouse_y),
-    viewer.core(screen).proj * viewer.core(screen).view,viewer.core(screen).viewport,Vector4d(0, 0, 1, 0),Z);
+    viewer.core(screen).proj * viewer.core(screen).view,viewer.core(screen).viewport,d,Zaxis);
 
     
-  Vector2d current_mouse_coordinate(Z(0), Z(1));
-  Vector2d translation = current_mouse_coordinate - previous_mouse_coordinate;
+  Vector2d cur_mouse(Zaxis(0), Zaxis(1));
+  Vector2d tranlation = cur_mouse - prev_mouse;
 
-  previous_mouse_coordinate = current_mouse_coordinate;
-  if (choosen_control_vertex < Vertices.rows())
+  prev_mouse = cur_mouse;
+  if (choosen_control_vertex < Vertices_cage.rows())
   {
     double position=choosen_control_vertex;
-    Vertices.row(position) += translation;
+    Vertices_cage.row(position) += tranlation;
   } else
   {
-    double position=choosen_control_vertex - Vertices.rows();
-    control_vertices.row(position) += translation;
+    double position=choosen_control_vertex - Vertices_cage.rows();
+    control_vertices.row(position) += tranlation;
   }
 
   V.setZero();
@@ -171,15 +204,15 @@ bool callback_mouse_move(Viewer& viewer, int mouse_x, int mouse_y)
   while(it<V.rows())
   {
     int j=0;
-    while (j<Vertices.rows()+control_vertices.rows())
+    while (j<Vertices_cage.rows()+control_vertices.rows())
     {
-      if (j < Vertices.rows())
+      if (j < Vertices_cage.rows())
           {
-            V.row(it) =V.row(it)+ weight(j, it) * Vertices.row(j);
+            V.row(it) =V.row(it)+ weight(j, it) * Vertices_cage.row(j);
           }
       else
           { 
-            V.row(it) = V.row(it)+ weight(j, it) * control_vertices.row(j-Vertices.rows());
+            V.row(it) = V.row(it)+ weight(j, it) * control_vertices.row(j-Vertices_cage.rows());
           }
       j++;
     }
@@ -187,14 +220,15 @@ bool callback_mouse_move(Viewer& viewer, int mouse_x, int mouse_y)
   }
   viewer.data(model_mesh).clear();
   viewer.data(model_mesh).set_mesh(V, F);
-  viewer.data(model_mesh).add_points(Vertices, r1);
+  viewer.data(model_mesh).add_points(Vertices_cage, r1);
   int i=0;
-  while(i<Vertices.rows())
+
+  while(i<Vertices_cage.rows())
   {
-    viewer.data(model_mesh).add_edges(Vertices.row(Faces_cage(i, 0)),Vertices.row(Faces_cage(i, 1)),r1);
+    viewer.data(model_mesh).add_edges(Vertices_cage.row(Faces_cage(i, 0)),Vertices_cage.row(Faces_cage(i, 1)),r1);
     i++;
   }
- 
+
   viewer.data(model_mesh).add_points(control_vertices, r2);
 
   int j=0;
@@ -220,7 +254,7 @@ while(in<n)
   }
 }
 
-bool callback_mouse_up(Viewer& viewer, int button, int modifier)
+bool mouse_up(Viewer& viewer, int button, int modifier)
 {
   if (Flag==0)  
   {
@@ -231,7 +265,7 @@ bool callback_mouse_up(Viewer& viewer, int button, int modifier)
   return true;
 }
 
-void calc(MatrixXd x,MatrixXd Vertices,VectorXd ma ,VectorXd mi,VectorXd off)
+void calc_harmonic(MatrixXd x,MatrixXd Vertices,VectorXd ma ,VectorXd mi,VectorXd off)
 {
   double a=ma(0)+off(0);
   double b=mi(0)-off(0);
@@ -246,9 +280,9 @@ void calc(MatrixXd x,MatrixXd Vertices,VectorXd ma ,VectorXd mi,VectorXd off)
 // triangulates inside the cage
 MatrixXd triang_vertices;
 MatrixXi triang_faces;
-void helper(int a)
+
+void Spacing(int a)
 {
-  // Set up linear solver
   cage_vertices = VectorXi::LinSpaced(a, 0, a-1);
   rest_verties = VectorXi::LinSpaced(triang_vertices.rows()-a, 
                                               a, triang_vertices.rows()-1);
@@ -292,16 +326,19 @@ void Laplacian(SparseMatrix<double> L,SparseMatrix<double> A,int a,SparseMatrix<
 void Barycentric_cood(MatrixXd P1 ,MatrixXd P2, MatrixXd P3)
 {
   MatrixXd P;
-  igl::slice(triang_vertices, triang_faces.col(0), 1, P1);
-  igl::slice(triang_vertices, triang_faces.col(1), 1, P2);
   igl::slice(triang_vertices, triang_faces.col(2), 1, P3);
+  double prev_trip3=P3.rows();
+  igl::slice(triang_vertices, triang_faces.col(1), 1, P2);
+  double prev_trip2=P2.rows();
+  igl::slice(triang_vertices, triang_faces.col(0), 1, P1);
+  double prev_trip1=P1.rows();
   int in=0;
     while(in<V.rows())
     {
     P = V.row(in).replicate(triang_faces.rows(), 1);
     MatrixXd bcs ;
     igl::barycentric_coordinates(P, P1, P2, P3, bcs);
-    int triangle_idx = -1;
+    int tri_idx = -1;
     int itr=0;
     while(itr<triang_faces.rows())
     {
@@ -311,18 +348,18 @@ void Barycentric_cood(MatrixXd P1 ,MatrixXd P2, MatrixXd P3)
           {
             if(bcs(itr,2)<=1 && bcs(itr,2)>=0)
       {
-        triangle_idx = itr;
+        tri_idx = itr;
         break;
       }}}
       ++itr;
     }
-    RowVector3d bc = bcs.row(triangle_idx);
+    RowVector3d bc = bcs.row(tri_idx);
     int it=0;
     while(it<cage_weights.rows())
     {
-      double x = bc(0)*cage_weights(it, triang_faces(triangle_idx, 0));
-      double y =bc(1)*cage_weights(it, triang_faces(triangle_idx, 1));
-      double z =bc(2)*cage_weights(it, triang_faces(triangle_idx, 2));
+      double x = bc(0)*cage_weights(it, triang_faces(tri_idx, 0));
+      double y =bc(1)*cage_weights(it, triang_faces(tri_idx, 1));
+      double z =bc(2)*cage_weights(it, triang_faces(tri_idx, 2));
       weight(it, in) = x+y+z;
     ++it;
     }
@@ -330,23 +367,28 @@ void Barycentric_cood(MatrixXd P1 ,MatrixXd P2, MatrixXd P3)
   }
 }
 
+void Triangulation()
+{
+  MatrixXd points(Vertices_cage.rows() + control_vertices.rows() + V.rows(), 2);
+  points << Vertices_cage, control_vertices, V;
+  double size_mesh=points.rows()+Faces_cage.rows();
+  MatrixXd mesh(points.rows()+Faces_cage.rows(),2);
+  igl::triangle::triangulate(points, Faces_cage, Ht, "1", triang_vertices, triang_faces);
+}
+
 void calculate_harmonic_function() 
 {
-  // triangulate the cage
-  int control_vertex_num = Vertices.rows()+control_vertices.rows();
+  int num_c = Vertices_cage.rows()+control_vertices.rows();
+  Triangulation();
+  double size=Vertices_cage.rows()+control_vertices.rows();
+  cage_weights.resize(size, triang_vertices.rows());
+  weight.resize(size, V.rows());
 
-  MatrixXd points(Vertices.rows() + control_vertices.rows() + V.rows(), 2);
-  points << Vertices, control_vertices, V;
-  igl::triangle::triangulate(points, Faces_cage, H, "", triang_vertices, triang_faces);
-
-  cage_weights.resize(Vertices.rows()+control_vertices.rows(), triang_vertices.rows());
-  weight.resize(Vertices.rows()+control_vertices.rows(), V.rows());
-
-  helper(control_vertex_num);
+  Spacing(num_c);
   SparseMatrix<double> L,A;
   SparseMatrix<double> A_ff, A_Faces_cage;
 
-  Laplacian(L,A,control_vertex_num,A_ff,A_Faces_cage);
+  Laplacian(L,A,num_c,A_ff,A_Faces_cage);
   weight.setZero();
   MatrixXd p1,p2,p3;
   Barycentric_cood(p1,p2,p3);
@@ -379,7 +421,6 @@ class Cell{
 class Derived : public Cell
 {
   void print(int n){
-    //cout<< grid_harmoic_coord;
     }
   void initialize(int n) {
         for (int i = 0; i<n ; i++ ) {
@@ -394,9 +435,7 @@ typedef vector<Cell> v2d;
 typedef vector<v2d> Grid;
 
 Grid grid;
-void grid_change(int grid_side_vertices,int total_vertices ,MatrixXd grid1){
-  //cout<< grid.row(j)
-            
+void grid_change(int grid_side_vertices,int total_vertices ,MatrixXd grid1){            
 }
 
 void Grid_Create(MatrixXd& grid, int grid_size) {
@@ -430,13 +469,13 @@ int main(int argc, char *argv[])
 {
   
   igl::readOFF("../data/man.off",V,F);
-  igl::readOFF("../data/cage.off", Vertices, Faces_cage);
+  igl::readOFF("../data/cage.off", Vertices_cage, Faces_cage);
   double rowM=V.rows();
-  double rowC=Vertices.rows();
+  double rowC=Vertices_cage.rows();
   
   V.conservativeResize(rowM, 2);
-  Vertices.conservativeResize(rowC, 2);
-  Re_size(main_vertices,Vertices);
+  Vertices_cage.conservativeResize(rowC, 2);
+  Re_size(main_vertices,Vertices_cage);
   control_vertices.resize(0,2);
   Re_size(original_Vi,control_vertices);
   
@@ -444,25 +483,23 @@ int main(int argc, char *argv[])
   calculate_harmonic_function();
   
   MatrixXd starts;
-  igl::slice(Vertices, Faces_cage.col(0), 1, starts);
+  igl::slice(Vertices_cage, Faces_cage.col(0), 1, starts);
   MatrixXd ends;
-  igl::slice(Vertices, Faces_cage.col(1), 1, ends);
+  igl::slice(Vertices_cage, Faces_cage.col(1), 1, ends);
   min_dist = (ends - starts).rowwise().norm().minCoeff();
   
-  VectorXd max(Vertices.colwise().maxCoeff());
-  VectorXd min(Vertices.colwise().minCoeff());
+  VectorXd max(Vertices_cage.colwise().maxCoeff());
+  VectorXd min(Vertices_cage.colwise().minCoeff());
   VectorXd offset = (max-min);
-  MatrixXd V_square(Vertices.rows()+4,2);
-  // for (int i = 0; i < Vertices.rows(); ++i)
-  // V_square.row(i) << Vertices.row(i);
+  MatrixXd V_square(Vertices_cage.rows()+4,2);
   int i=0;
   while(i<rowC)
   {
-  V_square.row(i) << Vertices.row(i);
+  V_square.row(i) << Vertices_cage.row(i);
   i++; 
   }
-  calc(V_square,Vertices,max,min,offset);
-  setM(E,Vertices);
+  calc_harmonic(V_square,Vertices_cage,max,min,offset);
+  setM(E,Vertices_cage);
   // Plot the mesh
   Viewer viewer;
   Grid_Create(GridVertices, grid_size);
@@ -505,12 +542,11 @@ int main(int argc, char *argv[])
   viewer.data(model_mesh).clear();
   viewer.data(model_mesh).set_mesh(V, F);
   //update_edge(viewer,Vertices,Faces_cage,RowVector3d(1,0,0),model_mesh);
-  viewer.data(model_mesh).add_points(Vertices, r1);
-  // for (int i = 0; i < rowC; ++i)
+  viewer.data(model_mesh).add_points(Vertices_cage, r1);
   int l=0;
   while(l<rowC)
   {
-    viewer.data(model_mesh).add_edges(Vertices.row(Faces_cage(l, 0)),Vertices.row(Faces_cage(l, 1)),r1);
+    viewer.data(model_mesh).add_edges(Vertices_cage.row(Faces_cage(l, 0)),Vertices_cage.row(Faces_cage(l, 1)),r1);
     l++;
   }
   viewer.data(model_mesh).add_points(control_vertices, r2);
@@ -518,17 +554,17 @@ int main(int argc, char *argv[])
   int j=0;
   while(j<control_faces.rows())
   {
-    viewer.data(model_mesh).add_edges(Vertices.row(Faces_cage(j, 0)),Vertices.row(Faces_cage(j, 1)),r2);
+    viewer.data(model_mesh).add_edges(Vertices_cage.row(Faces_cage(j, 0)),Vertices_cage.row(Faces_cage(j, 1)),r2);
     j++;
   }
   viewer.data(model_mesh_wei).set_mesh(triang_vertices, triang_faces);
   viewer.data(model_mesh_wei).set_data(cage_weights.row(current_cage_index));
-  viewer.data(model_mesh_wei).add_points(Vertices, r1);
+  viewer.data(model_mesh_wei).add_points(Vertices_cage, r1);
  
   int k=0;
   while(k<rowC)
   {
-    viewer.data(model_mesh).add_edges(Vertices.row(Faces_cage(k, 0)),Vertices.row(Faces_cage(k, 1)),r1);
+    viewer.data(model_mesh).add_edges(Vertices_cage.row(Faces_cage(k, 0)),Vertices_cage.row(Faces_cage(k, 1)),r1);
     k++;
   }
   viewer.data(model_mesh_wei).add_points(control_vertices, r2);
@@ -536,13 +572,13 @@ int main(int argc, char *argv[])
   int ij=0;
   while(ij<control_faces.rows())
   {
-    viewer.data(model_mesh).add_edges(Vertices.row(Faces_cage(ij, 0)),Vertices.row(Faces_cage(ij, 1)),r1);
+    viewer.data(model_mesh).add_edges(Vertices_cage.row(Faces_cage(ij, 0)),Vertices_cage.row(Faces_cage(ij, 1)),r1);
     ij++;
   }
 
-  viewer.callback_mouse_down = callback_mouse_down;
-  viewer.callback_mouse_move = callback_mouse_move;
-  viewer.callback_mouse_up = callback_mouse_up;
+  viewer.callback_mouse_down = mouse_down;
+  viewer.callback_mouse_move = mouse_move;
+  viewer.callback_mouse_up = mouse_up;
 
   viewer.launch();
 }
